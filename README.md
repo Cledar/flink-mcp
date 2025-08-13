@@ -38,9 +38,9 @@ Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
 ### Tools
 
-- `open_a_new_session(properties: dict|None)` → returns `sessionHandle`
+- `open_new_session(properties: dict|None)` → returns `sessionHandle`
 - `get_session_handle_config(session_handle: str)`
-- `execute_a_query(session_handle: str, query: str, execution_config: dict|None)` → returns `operationHandle`
+- `execute_query(session_handle: str, query: str, execution_config: dict|None)` → returns `operationHandle`
 - `get_operation_status(session_handle: str, operation_handle: str)`
 - `fetch_result_page(session_handle: str, operation_handle: str, token: int=0, row_format: str="OBJECT")`
 

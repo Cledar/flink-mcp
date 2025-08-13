@@ -22,7 +22,7 @@ def build_server() -> FastMCP:
         return client.get_info()
 
     @server.tool()
-    def open_a_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Open a new SQL Gateway session. Return includes 'sessionHandle'.
         If your agent/tooling supports memory, persist the handle for reuse.
@@ -35,7 +35,7 @@ def build_server() -> FastMCP:
         return client.get_session(session_handle)
 
     @server.tool()
-    def execute_a_query(
+    def execute_query(
         session_handle: str,
         query: str,
         execution_config: Optional[Dict[str, Any]] = None,
@@ -65,7 +65,7 @@ def build_server() -> FastMCP:
     @server.prompt()
     def manage_session_handle() -> str:
         return (
-            "If you do not have a valid 'sessionHandle', call open_a_new_session() first and remember the handle. "
+            "If you do not have a valid 'sessionHandle', call open_new_session() first and remember the handle. "
             "If a session has expired or is invalid, create a new one and continue."
         )
 
