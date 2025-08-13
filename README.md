@@ -14,13 +14,27 @@ This project provides an MCP server that connects to Apache Flink SQL Gateway.
 
 ### Run
 
-Use the MCP stdio transport:
+Use the MCP stdio transport in one of these ways:
+
+Option A — Installed (recommended):
 
 ```bash
-python -m ff2025
+pip install -e .
+ff2025
 ```
 
-This starts the MCP server over stdio. Configure your MCP-compatible client to launch the module `ff2025`.
+Option B — Without installing (dev):
+
+```bash
+PYTHONPATH=src python -m ff2025.main
+```
+
+MCP clients can launch the server over stdio by configuring either:
+
+- command: `ff2025` (after install), or
+- command: `python`, args: `-m ff2025.main` (without install)
+
+Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
 ### Tools
 

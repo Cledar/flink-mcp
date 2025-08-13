@@ -16,7 +16,7 @@ def build_server() -> FastMCP:
 
     client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
 
-    @server.resource("flink/info")
+    @server.resource("https://mcp.local/flink/info")
     def flink_info() -> Dict[str, Any]:
         """Get Flink cluster info via SQL Gateway /v1/info."""
         return client.get_info()
