@@ -55,7 +55,7 @@ def test_statement_flow_mocked() -> None:
             == f"/v3/sessions/{session_handle}/operations/{operation_handle}/result/0"
         ):
             # Optionally ensure rowFormat=JSON is requested
-            assert "rowFormat=JSON" in (request.url.query or "")
+            assert b"rowFormat=JSON" in (request.url.query or b"")
             return httpx.Response(200, json={"result": "ok", "data": [[1]]})
 
         return httpx.Response(404, json={"message": "not mocked"})
