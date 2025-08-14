@@ -8,7 +8,6 @@ from mcp.server.fastmcp import FastMCP
 
 from .flink_sql_gateway_client import FlinkSqlGatewayClient
 
-
 def build_server() -> FastMCP:
     load_dotenv()
 
@@ -79,6 +78,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
 
 

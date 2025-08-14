@@ -1,4 +1,4 @@
-## Flink MCP Server
+## flink-mcp — Flink MCP Server
 
 This project provides an MCP server that connects to Apache Flink SQL Gateway.
 
@@ -14,25 +14,14 @@ This project provides an MCP server that connects to Apache Flink SQL Gateway.
 
 ### Run
 
-Use the MCP stdio transport in one of these ways:
-
-Option A — Installed (recommended):
+Install and run via the console script:
 
 ```bash
 pip install -e .
-ff2025
+flink-mcp
 ```
 
-Option B — Without installing (dev):
-
-```bash
-PYTHONPATH=src python -m ff2025.main
-```
-
-MCP clients can launch the server over stdio by configuring either:
-
-- command: `ff2025` (after install), or
-- command: `python`, args: `-m ff2025.main` (without install)
+MCP clients should launch the server over stdio with command: `flink-mcp`.
 
 Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
@@ -42,7 +31,7 @@ Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 - `get_session_handle_config(session_handle: str)`
 - `execute_query(session_handle: str, query: str, execution_config: dict|None)` → returns `operationHandle`
 - `get_operation_status(session_handle: str, operation_handle: str)`
-- `fetch_result_page(session_handle: str, operation_handle: str, token: int=0, row_format: str="OBJECT")`
+- `fetch_result_page(session_handle: str, operation_handle: str, token: int=0)`
 
 ### Notes
 

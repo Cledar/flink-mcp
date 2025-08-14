@@ -5,7 +5,7 @@ from typing import Callable
 import httpx
 import pytest
 
-from ff2025.flink_sql_gateway_client import FlinkSqlGatewayClient
+from flink_mcp.flink_sql_gateway_client import FlinkSqlGatewayClient
 
 
 # ----------------------
@@ -45,7 +45,7 @@ def test_statement_flow_mocked() -> None:
             return httpx.Response(200, json={"operationHandle": operation_handle})
 
         # Operation status
-        if request.method == "GET" and request.url.path == f"/v3/sessions/{session_handle}/operations/{operation_handle}":
+        if request.method == "GET" and request.url.path == f"/v3/sessions/{session_handle}/operations/{operation_handle}/status":
             return httpx.Response(200, json={"status": {"status": "FINISHED"}})
 
         # Fetch result page 0
@@ -54,6 +54,8 @@ def test_statement_flow_mocked() -> None:
             and request.url.path
             == f"/v3/sessions/{session_handle}/operations/{operation_handle}/result/0"
         ):
+            # Optionally ensure rowFormat=JSON is requested
+            assert "rowFormat=JSON" in (request.url.query or "")
             return httpx.Response(200, json={"result": "ok", "data": [[1]]})
 
         return httpx.Response(404, json={"message": "not mocked"})
