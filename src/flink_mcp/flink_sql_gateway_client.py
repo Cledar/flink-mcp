@@ -88,7 +88,6 @@ class FlinkSqlGatewayClient:
                 f"/v3/sessions/{session_handle}/operations/{operation_handle}/result/{token}?rowFormat=JSON"
             )
         )
-        response.raise_for_status()
         return response.json()
 
     def close(self) -> None:
