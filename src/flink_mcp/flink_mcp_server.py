@@ -20,21 +20,6 @@ def build_server() -> FastMCP:
 
     client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
 
-    # Server-managed session and stream registry
-    # _stream_index maps jobId -> { session, operation, nextToken }
-    _session_handle: Optional[str] = None
-    _stream_index: Dict[str, Dict[str, Any]] = {}
-
-    def _ensure_session() -> str:
-        nonlocal _session_handle
-        if _session_handle:
-            return _session_handle
-        resp = client.open_session({})
-        handle = resp.get("sessionHandle")
-        if not isinstance(handle, str):
-            raise RuntimeError("Failed to open Flink SQL Gateway session")
-        _session_handle = handle
-        return _session_handle
 
     def _poll_status(
         session_handle: str, operation_handle: str, timeout: float, interval: float
@@ -131,29 +116,32 @@ def build_server() -> FastMCP:
         """Return basic cluster information from the SQL Gateway /v1/info endpoint."""
         return client.get_info()
 
+    @server.tool(name="open_new_session")
+    def _open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Open a new session and return { sessionHandle, ... }."""
+        return client.open_session(properties or {})
+    setattr(server, "open_new_session", _open_new_session)
+
     @server.tool()
-    def get_config() -> Dict[str, Any]:
-        """Return current session configuration (properties) for the managed session."""
-        session_handle = _ensure_session()
+    def get_config(session_handle: str) -> Dict[str, Any]:
+        """Return current session configuration (properties) for the given session."""
         return client.get_session(session_handle)
-    # Expose for tests
     setattr(server, "get_config", get_config)
 
     @server.tool()
-    def configure_session(statement: str) -> Dict[str, Any]:
+    def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
         """Apply a single session-scoped DDL/config statement (CREATE/USE/SET/RESET/etc.)."""
-        session_handle = _ensure_session()
         return client.configure_session(session_handle=session_handle, statement=statement)
     setattr(server, "configure_session", configure_session)
 
     @server.tool()
     def run_query_collect_and_stop(
+        session_handle: str,
         query: str,
         max_rows: int = 5,
         max_seconds: float = 15.0,
     ) -> Dict[str, Any]:
         """Run a short-lived query, fetch up to max_rows within max_seconds, then stop the job if present."""
-        session_handle = _ensure_session()
         deadline = time.time() + max_seconds
 
         try:
@@ -224,9 +212,8 @@ def build_server() -> FastMCP:
     setattr(server, "run_query_collect_and_stop", run_query_collect_and_stop)
 
     @server.tool()
-    def run_query_stream_start(query: str) -> Dict[str, Any]:
+    def run_query_stream_start(session_handle: str, query: str) -> Dict[str, Any]:
         """Start a streaming query and return its cluster jobID; leaves the job running."""
-        session_handle = _ensure_session()
 
         try:
             exec_resp = client.execute_statement(session_handle, query)
@@ -269,15 +256,12 @@ def build_server() -> FastMCP:
         if not isinstance(jid, str):
             return {"errorType": "JOB_ID_NOT_AVAILABLE", "message": "job id not present in results"}
 
-        _stream_index[jid] = {"session": session_handle, "operation": op, "nextToken": 1}
-        return {"jobID": jid}
+        return {"jobID": jid, "operationHandle": op}
     setattr(server, "run_query_stream_start", run_query_stream_start)
 
     @server.tool()
-    def cancel_job(job_id: str) -> Dict[str, Any]:
+    def cancel_job(session_handle: str, job_id: str) -> Dict[str, Any]:
         """Issue STOP JOB <job_id> and remove internal tracking state for that job."""
-        session_handle = _ensure_session()
-
         logger.debug("cancel_job: submitting STOP JOB %s", job_id)
         stop_status = _submit_stop_job(session_handle, job_id, 30.0, 0.5)
         if stop_status is not None:
@@ -289,29 +273,23 @@ def build_server() -> FastMCP:
         job_gone, last_status = _wait_job_stopped(session_handle, job_id, 60.0, 1.0)
         logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
-        _stream_index.pop(job_id, None)
         return {"jobID": job_id, "status": "STOP_SUBMITTED", "jobGone": job_gone, "jobStatus": last_status}
     setattr(server, "cancel_job", cancel_job)
 
     @server.tool()
-    def fetch_result_by_jobid(job_id: str) -> Dict[str, Any]:
-        """Fetch a single page for a tracked job using a single shared cursor per job."""
-        stream = _stream_index.get(job_id)
-        if not stream:
-            return {"errorType": "UNKNOWN_JOB", "message": "job not tracked"}
-        session_handle = stream["session"]
-        operation_handle = stream["operation"]
-        token = int(stream.get("nextToken", 0))
-
+    def fetch_result_page(session_handle: str, operation_handle: str, token: int) -> Dict[str, Any]:
+        """Fetch a single page for the given operation handle and token."""
         page = client.fetch_result(session_handle, operation_handle, token=token)
-        token += 1
         rtype = str(page.get("resultType") or "").upper()
-        is_end = rtype == "EOS"
+        return {"page": page, "isEnd": rtype == "EOS", "nextToken": token + 1}
+    setattr(server, "fetch_result_page", fetch_result_page)
 
-        stream["nextToken"] = max(int(stream.get("nextToken", 0)), token)
-        return {"page": page, "nextToken": token, "isEnd": is_end}
-    setattr(server, "fetch_result_by_jobid", fetch_result_by_jobid)
-
+    @server.prompt()
+    def manage_session() -> str:
+        return (
+            "If you do not have a valid 'sessionHandle', call open_new_session() first and remember the handle. "
+            "If a session has expired or is invalid, create a new one and continue."
+        )
     return server
 
 
