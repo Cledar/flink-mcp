@@ -7,7 +7,7 @@ This project provides an MCP server that connects to Apache Flink SQL Gateway.
 - A running Apache Flink cluster and SQL Gateway
   - Start cluster: `./bin/start-cluster.sh`
   - Start gateway: `./bin/sql-gateway.sh start -Dsql-gateway.endpoint.rest.address=localhost`
-  - Verify: `curl http://localhost:8083/v1/info`
+  - Verify: `curl http://localhost:8083/v3/info`
 
 - Configure environment:
   - Set `SQL_GATEWAY_API_BASE_URL` (default `http://localhost:8083`). You can use a `.env` file at repo root.
@@ -25,17 +25,21 @@ MCP clients should launch the server over stdio with command: `flink-mcp`.
 
 Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
-### Tools
+### Tools (v0.2.0)
 
-- `open_new_session(properties: dict|None)` → returns `sessionHandle`
-- `get_session_handle_config(session_handle: str)`
-- `execute_query(session_handle: str, query: str, execution_config: dict|None)` → returns `operationHandle`
-- `get_operation_status(session_handle: str, operation_handle: str)`
-- `fetch_result_page(session_handle: str, operation_handle: str, token: int=0)`
+- `flink_info` (resource): returns cluster info from `/v3/info`.
+- `get_config`: returns current managed session configuration (no session handle exposed).
+- `configure_session(statement: str)`: apply session-scoped DDL/config (CREATE/USE/SET/RESET/LOAD/UNLOAD/ADD JAR).
+- `run_query_collect_and_stop(query: str, max_rows: int=5, max_seconds: float=15.0)`: execute, fetch up to N rows within T seconds, then STOP the job if a `jobID` is present; closes the operation.
+- `run_query_stream_start(query: str)`: execute a streaming query and return only `jobID`; the job is left running.
+- `fetch_result_by_jobid(job_id: str, consumer_id: str = "default", start_token: int|None = None, max_pages: int=5)`: fetch up to `max_pages` pages for a tracked job. Maintains per-consumer cursors.
+- `cancel_job(job_id: str)`: issue `STOP JOB <job_id>` and clear tracking state.
 
 ### Notes
 
-- Endpoints target SQL Gateway v3-style paths when available.
-- Inspired by: "Hands-on MCP Server Deep Dive: Connecting Flink SQL Gateway to the LLM Ecosystem".
+- The server owns a single long‑lived session; tools do not expose session/operation handles.
+- `run_query_stream_start` peeks token 0 to read `jobID`; use `fetch_result_by_jobid` to stream results.
+- `cancel_job` issues STOP JOB; `close_operation` is invoked internally where appropriate.
+- Endpoints target SQL Gateway v3-style paths.
 
 

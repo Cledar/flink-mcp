@@ -20,7 +20,7 @@ def _make_mock_client(responder: Callable[[httpx.Request], httpx.Response]) -> h
 def test_get_info_mocked() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/v1/info"
+        assert request.url.path == "/v3/info"
         return httpx.Response(200, json={"productName": "Apache Flink", "version": "test"})
 
     client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
@@ -130,7 +130,7 @@ def test_live_select_one() -> None:
         while time.monotonic() < deadline:
             status_resp = client.get_operation_status(session_handle, operation_handle)
             status_value = status_resp["status"]
-            if status_value in {"FINISHED", "CANCELED", "FAILED"}:
+            if status_value in {"FINISHED", "CANCELED", "ERROR"}:
                 break
             time.sleep(0.2)
 
@@ -152,5 +152,37 @@ def test_live_select_one() -> None:
         assert fields[0] == 1
     finally:
         client.close()
+
+
+def test_configure_session_mocked() -> None:
+    session_handle = "sess-abc"
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v3/sessions":
+            return httpx.Response(200, json={"sessionHandle": session_handle})
+        if request.method == "POST" and request.url.path == f"/v3/sessions/{session_handle}/configure-session":
+            assert request.content and b"statement" in request.content
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
+    created = client.open_session()
+    assert created.get("sessionHandle") == session_handle
+    resp = client.configure_session(session_handle, "USE CATALOG default_catalog")
+    assert isinstance(resp, dict)
+
+
+def test_close_operation_mocked() -> None:
+    session_handle = "sess-1"
+    operation_handle = "op-2"
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE" and request.url.path == f"/v3/sessions/{session_handle}/operations/{operation_handle}/close":
+            return httpx.Response(200, json={"status": "CLOSED"})
+        return httpx.Response(404)
+
+    client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
+    resp = client.close_operation(session_handle, operation_handle)
+    assert isinstance(resp, dict)
 
 
