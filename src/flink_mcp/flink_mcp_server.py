@@ -93,6 +93,39 @@ def build_server() -> FastMCP:
         except Exception:
             return None
 
+    def _submit_stop_job(
+        session_handle: str, job_id: str, timeout: float = 30.0, interval: float = 0.5
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """Submit STOP JOB for a given job and poll the stop operation until terminal status.
+
+        Returns a tuple of (status, payload) if an operation handle is available, otherwise None.
+        """
+        stop_exec = client.execute_statement(session_handle, f"STOP JOB '{job_id}'")
+        stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
+        if isinstance(stop_op, dict):
+            stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
+        if isinstance(stop_op, str):
+            return _poll_status(session_handle, stop_op, timeout, interval)
+        return None
+
+    def _wait_job_stopped(
+        session_handle: str, job_id: str, timeout: float = 60.0, interval: float = 1.0
+    ) -> Tuple[bool, Optional[str]]:
+        """Wait until DESCRIBE JOB reports the job is not RUNNING (or job is gone).
+
+        Returns (job_gone, last_status).
+        """
+        deadline = time.time() + timeout
+        job_gone = False
+        last_status: Optional[str] = None
+        while time.time() < deadline:
+            last_status = _job_status(session_handle, job_id)
+            if last_status is None or str(last_status).strip().upper() != "RUNNING":
+                job_gone = True
+                break
+            time.sleep(interval)
+        return job_gone, last_status
+
     @server.resource("https://mcp.local/flink/info")
     def flink_info() -> Dict[str, Any]:
         """Return basic cluster information from the SQL Gateway /v1/info endpoint."""
@@ -171,12 +204,7 @@ def build_server() -> FastMCP:
 
         stop_result: Optional[Dict[str, Any]] = None
         if jid:
-            stop_exec = client.execute_statement(session_handle, f"STOP JOB '{jid}'")
-            stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
-            if isinstance(stop_op, dict):
-                stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
-            if isinstance(stop_op, str):
-                _, _ = _poll_status(session_handle, stop_op, 30.0, 0.5)
+            _submit_stop_job(session_handle, jid, 30.0, 0.5)
             stop_result = {"ok": True}
 
         try:
@@ -251,25 +279,14 @@ def build_server() -> FastMCP:
         session_handle = _ensure_session()
 
         logger.debug("cancel_job: submitting STOP JOB %s", job_id)
-        stop_exec = client.execute_statement(session_handle, f"STOP JOB '{job_id}'")
-        stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
-        if isinstance(stop_op, dict):
-            stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
-        if isinstance(stop_op, str):
-            status, payload = _poll_status(session_handle, stop_op, 30.0, 0.5)
+        stop_status = _submit_stop_job(session_handle, job_id, 30.0, 0.5)
+        if stop_status is not None:
+            status, payload = stop_status
             logger.debug("cancel_job: STOP operation status=%s payload=%s", status, payload)
 
         # Wait until job is no longer running according to DESCRIBE JOB
         logger.debug("cancel_job: waiting for job %s to stop (DESCRIBE JOB)", job_id)
-        deadline = time.time() + 60.0
-        job_gone = False
-        last_status: Optional[str] = None
-        while time.time() < deadline:
-            last_status = _job_status(session_handle, job_id)
-            if last_status is None or str(last_status).strip().upper() != "RUNNING":
-                job_gone = True
-                break
-            time.sleep(1.0)
+        job_gone, last_status = _wait_job_stopped(session_handle, job_id, 60.0, 1.0)
         logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
         _stream_index.pop(job_id, None)
