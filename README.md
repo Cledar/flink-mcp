@@ -25,21 +25,22 @@ MCP clients should launch the server over stdio with command: `flink-mcp`.
 
 Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
-### Tools (v0.2.0)
+### Tools (v0.2.0, stateless)
 
 - `flink_info` (resource): returns cluster info from `/v3/info`.
-- `get_config`: returns current managed session configuration (no session handle exposed).
-- `configure_session(statement: str)`: apply session-scoped DDL/config (CREATE/USE/SET/RESET/LOAD/UNLOAD/ADD JAR).
-- `run_query_collect_and_stop(query: str, max_rows: int=5, max_seconds: float=15.0)`: execute, fetch up to N rows within T seconds, then STOP the job if a `jobID` is present; closes the operation.
-- `run_query_stream_start(query: str)`: execute a streaming query and return only `jobID`; the job is left running.
-- `fetch_result_by_jobid(job_id: str)`: fetch a single page for a tracked job; returns `{ page, nextToken, isEnd }`.
-- `cancel_job(job_id: str)`: issue `STOP JOB '<job_id>'`, wait until job status is not RUNNING, and clear tracking state. Returns `{ jobID, status, jobGone, jobStatus }`.
+- `open_new_session(properties?: dict)` -> `{ sessionHandle, ... }`.
+- `get_config(sessionHandle: str)`: returns session configuration.
+- `configure_session(sessionHandle: str, statement: str)`: apply session-scoped DDL/config (CREATE/USE/SET/RESET/LOAD/UNLOAD/ADD JAR).
+- `run_query_collect_and_stop(sessionHandle: str, query: str, max_rows: int=5, max_seconds: float=15.0)`: execute, fetch up to N rows within T seconds, then STOP the job if a `jobID` is present; closes the operation.
+- `run_query_stream_start(sessionHandle: str, query: str)`: execute a streaming query and return `{ jobID, operationHandle }`; the job is left running.
+- `fetch_result_page(sessionHandle: str, operationHandle: str, token: int)`: fetch a single page; returns `{ page, nextToken, isEnd }`.
+- `cancel_job(sessionHandle: str, jobId: str)`: issue `STOP JOB '<jobId>'`, wait until DESCRIBE JOB status is not RUNNING; returns `{ jobID, status, jobGone, jobStatus }`.
 
 ### Notes
 
-- The server owns a single long‑lived session; tools do not expose session/operation handles.
-- `run_query_stream_start` peeks token 0 to read `jobID`; use `fetch_result_by_jobid` to stream results.
-- `cancel_job` issues STOP JOB; `close_operation` is invoked internally where appropriate.
+- Tools are stateless; clients manage and pass session/operation handles explicitly.
+- `run_query_stream_start` returns both `jobID` and `operationHandle`; use `fetch_result_page` to stream results.
+- `cancel_job` issues STOP and waits using DESCRIBE JOB; `close_operation` is invoked internally where appropriate.
 - Endpoints target SQL Gateway v3-style paths.
 
 
