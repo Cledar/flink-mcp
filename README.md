@@ -25,7 +25,8 @@ MCP clients should launch the server over stdio with command: `flink-mcp`.
 
 Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
-### Tools (v0.2.0, stateless)
+
+### Tools (v0.2.1)
 
 - `flink_info` (resource): returns cluster info from `/v3/info`.
 - `open_new_session(properties?: dict)` -> `{ sessionHandle, ... }`.
@@ -41,6 +42,7 @@ Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 - Tools are stateless; clients manage and pass session/operation handles explicitly.
 - `run_query_stream_start` returns both `jobID` and `operationHandle`; use `fetch_result_page` to stream results.
 - `cancel_job` issues STOP and waits using DESCRIBE JOB; `close_operation` is invoked internally where appropriate.
+
 - Endpoints target SQL Gateway v3-style paths.
 
 

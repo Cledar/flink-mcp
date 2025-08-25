@@ -20,7 +20,6 @@ def build_server() -> FastMCP:
 
     client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
 
-    # Stateless helpers only
 
     def _poll_status(
         session_handle: str, operation_handle: str, timeout: float, interval: float
@@ -291,7 +290,6 @@ def build_server() -> FastMCP:
             "If you do not have a valid 'sessionHandle', call open_new_session() first and remember the handle. "
             "If a session has expired or is invalid, create a new one and continue."
         )
-
     return server
 
 
