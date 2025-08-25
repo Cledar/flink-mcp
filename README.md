@@ -32,8 +32,8 @@ Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 - `configure_session(statement: str)`: apply session-scoped DDL/config (CREATE/USE/SET/RESET/LOAD/UNLOAD/ADD JAR).
 - `run_query_collect_and_stop(query: str, max_rows: int=5, max_seconds: float=15.0)`: execute, fetch up to N rows within T seconds, then STOP the job if a `jobID` is present; closes the operation.
 - `run_query_stream_start(query: str)`: execute a streaming query and return only `jobID`; the job is left running.
-- `fetch_result_by_jobid(job_id: str, consumer_id: str = "default", start_token: int|None = None, max_pages: int=5)`: fetch up to `max_pages` pages for a tracked job. Maintains per-consumer cursors.
-- `cancel_job(job_id: str)`: issue `STOP JOB <job_id>` and clear tracking state.
+- `fetch_result_by_jobid(job_id: str)`: fetch a single page for a tracked job; returns `{ page, nextToken, isEnd }`.
+- `cancel_job(job_id: str)`: issue `STOP JOB '<job_id>'`, wait until job status is not RUNNING, and clear tracking state. Returns `{ jobID, status, jobGone, jobStatus }`.
 
 ### Notes
 
