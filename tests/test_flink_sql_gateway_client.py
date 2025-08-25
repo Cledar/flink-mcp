@@ -1,9 +1,6 @@
-import os
-import time
 from typing import Callable
 
 import httpx
-import pytest
 
 from flink_mcp.flink_sql_gateway_client import FlinkSqlGatewayClient
 
@@ -20,7 +17,7 @@ def _make_mock_client(responder: Callable[[httpx.Request], httpx.Response]) -> h
 def test_get_info_mocked() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        assert request.url.path == "/v1/info"
+        assert request.url.path == "/v3/info"
         return httpx.Response(200, json={"productName": "Apache Flink", "version": "test"})
 
     client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
@@ -75,82 +72,40 @@ def test_statement_flow_mocked() -> None:
     assert result.get("result") == "ok"
 
 
-# ---------------------------------
-# Live integration tests (real HTTP)
-# ---------------------------------
-def _get_base_url() -> str:
-    return os.getenv("SQL_GATEWAY_API_BASE_URL", "http://localhost:8083")
+# Integration tests moved to dedicated files:
+# - tests/test_stream_workflow_integration.py
+# - tests/test_mcp_error_flows_integration.py
 
 
-@pytest.mark.integration
-def test_live_info() -> None:
-    base_url = _get_base_url()
-    client = FlinkSqlGatewayClient(base_url=base_url)
-    try:
-        info = client.get_info()
-        assert isinstance(info, dict)
-        assert "version" in info  # Flink typically exposes version here
-    finally:
-        client.close()
+def test_configure_session_mocked() -> None:
+    session_handle = "sess-abc"
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v3/sessions":
+            return httpx.Response(200, json={"sessionHandle": session_handle})
+        if request.method == "POST" and request.url.path == f"/v3/sessions/{session_handle}/configure-session":
+            assert request.content and b"statement" in request.content
+            return httpx.Response(200, json={})
+        return httpx.Response(404)
+
+    client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
+    created = client.open_session()
+    assert created.get("sessionHandle") == session_handle
+    resp = client.configure_session(session_handle, "USE CATALOG default_catalog")
+    assert isinstance(resp, dict)
 
 
-@pytest.mark.integration
-def test_live_open_session_minimal() -> None:
-    base_url = _get_base_url()
-    client = FlinkSqlGatewayClient(base_url=base_url)
-    try:
-        created = client.open_session()
-        assert isinstance(created, dict)
-        # Be lenient about schema across versions; just require a non-empty dict
-        assert len(created) > 0
-    finally:
-        client.close()
+def test_close_operation_mocked() -> None:
+    session_handle = "sess-1"
+    operation_handle = "op-2"
 
+    def responder(request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE" and request.url.path == f"/v3/sessions/{session_handle}/operations/{operation_handle}/close":
+            return httpx.Response(200, json={"status": "CLOSED"})
+        return httpx.Response(404)
 
-@pytest.mark.integration
-def test_live_select_one() -> None:
-    base_url = _get_base_url()
-    client = FlinkSqlGatewayClient(base_url=base_url)
-    try:
-        created = client.open_session()
-        assert isinstance(created, dict) and len(created) > 0
-        session_handle = created.get("sessionHandle")
-        if isinstance(session_handle, dict):
-            session_handle = session_handle.get("identifier") or session_handle.get("id") or session_handle.get("sessionId")
-        assert isinstance(session_handle, str) and session_handle
-
-        submitted = client.execute_statement(session_handle, "SELECT 1")
-        operation_handle = submitted.get("operationHandle")
-        if isinstance(operation_handle, dict):
-            operation_handle = operation_handle.get("identifier") or operation_handle.get("id") or operation_handle.get("operationId")
-        assert isinstance(operation_handle, str) and operation_handle
-
-        deadline = time.monotonic() + 15.0
-        status_value = None
-        while time.monotonic() < deadline:
-            status_resp = client.get_operation_status(session_handle, operation_handle)
-            status_value = status_resp["status"]
-            if status_value in {"FINISHED", "CANCELED", "FAILED"}:
-                break
-            time.sleep(0.2)
-
-        assert status_value == "FINISHED"
-
-        # Try first three pages quickly; SELECT 1 should appear on the first or second page
-        rows = []
-        for token in (0, 1, 2):
-            resp = client.fetch_result(session_handle, operation_handle, token=token)
-            data = resp["results"]["data"]
-            if data:
-                rows = data
-                break
-            time.sleep(0.1)
-
-        assert rows, "No rows returned from result pages 0..2"
-        first = rows[0]
-        fields = first["fields"]
-        assert fields[0] == 1
-    finally:
-        client.close()
+    client = FlinkSqlGatewayClient(base_url="http://mock", client=_make_mock_client(responder))
+    resp = client.close_operation(session_handle, operation_handle)
+    assert isinstance(resp, dict)
 
 
