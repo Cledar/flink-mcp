@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
+import logging
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -14,6 +15,8 @@ def build_server() -> FastMCP:
     load_dotenv()
 
     server = FastMCP("Flink SQLGateway MCP Server v0.2.0")
+
+    logger = logging.getLogger(__name__)
 
     client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
 
@@ -27,25 +30,68 @@ def build_server() -> FastMCP:
         if _session_handle:
             return _session_handle
         resp = client.open_session({})
-        handle = resp.get("sessionHandle") or (resp.get("session") or {}).get("handle")
+        handle = resp.get("sessionHandle")
         if not isinstance(handle, str):
             raise RuntimeError("Failed to open Flink SQL Gateway session")
         _session_handle = handle
         return _session_handle
 
-    def _poll_status(session_handle: str, operation_handle: str, timeout: float, interval: float) -> str:
+    def _poll_status(
+        session_handle: str, operation_handle: str, timeout: float, interval: float
+    ) -> Tuple[str, Dict[str, Any]]:
         end = time.time() + timeout
+        last_payload: Dict[str, Any] = {}
         while time.time() < end:
-            st = client.get_operation_status(session_handle, operation_handle)
-            status = str(st.get("status") or st.get("operationStatus") or "").upper()
+            last_payload = client.get_operation_status(session_handle, operation_handle)
+            status = str(last_payload.get("status", "")).upper()
             if status in {"FINISHED", "ERROR", "CANCELED", "CLOSED"}:
-                return status
+                return status, last_payload
             time.sleep(interval)
-        return "TIMEOUT"
+        return "TIMEOUT", last_payload
 
     def _extract_job_id(page: Dict[str, Any]) -> Optional[str]:
         j = page.get("jobID") or page.get("jobId")
         return j if isinstance(j, str) else None
+
+    def _job_status(session_handle: str, job_id: str) -> Optional[str]:
+        """Return current cluster job status via DESCRIBE JOB, or None if unavailable.
+
+        Extracts the value of the "status" column from the first row of the result.
+        """
+        try:
+            exec_resp = client.execute_statement(session_handle, f"DESCRIBE JOB '{job_id}'")
+            op = exec_resp.get("operationHandle") or exec_resp.get("operation_handle")
+            if isinstance(op, dict):
+                op = op.get("identifier") or op.get("handle") or op.get("id")
+            if not isinstance(op, str):
+                return None
+            status, _ = _poll_status(session_handle, op, 10.0, 0.5)
+            if status != "FINISHED":
+                return None
+            page0 = client.fetch_result(session_handle, op, token=0)
+            results = page0.get("results") or {}
+            columns = results.get("columns") or []
+            status_idx = None
+            for idx, col in enumerate(columns):
+                try:
+                    if str(col.get("name")).strip().lower() == "status":
+                        status_idx = idx
+                        break
+                except Exception:
+                    continue
+            if status_idx is None:
+                return None
+            rows = results.get("data") or []
+            if not rows:
+                return None
+            first = rows[0]
+            fields = first.get("fields") if isinstance(first, dict) else None
+            if not isinstance(fields, list) or status_idx >= len(fields):
+                return None
+            val = fields[status_idx]
+            return val if isinstance(val, str) else str(val)
+        except Exception:
+            return None
 
     @server.resource("https://mcp.local/flink/info")
     def flink_info() -> Dict[str, Any]:
@@ -77,16 +123,31 @@ def build_server() -> FastMCP:
         session_handle = _ensure_session()
         deadline = time.time() + max_seconds
 
-        exec_resp = client.execute_statement(session_handle, query)
-        op = exec_resp.get("operationHandle") or exec_resp.get("operation_handle")
-        if isinstance(op, dict):
-            op = op.get("identifier") or op.get("handle") or op.get("id")
+        try:
+            exec_resp = client.execute_statement(session_handle, query)
+        except Exception as e:
+            return {
+                "errorType": "EXECUTE_EXCEPTION",
+                "message": str(e),
+            }
+        op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
             return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
 
-        status = _poll_status(session_handle, op, max(0.0, deadline - time.time()), 0.5)
+        status, status_payload = _poll_status(session_handle, op, max(0.0, deadline - time.time()), 0.5)
         if status != "FINISHED":
-            return {"errorType": f"OPERATION_{status}", "message": "operation did not finish successfully"}
+            err: Dict[str, Any] = {
+                "errorType": f"OPERATION_{status}",
+                "message": "operation did not finish successfully",
+                "status": status,
+                "statusPayload": status_payload,
+            }
+            try:
+                err_page0 = client.fetch_result(session_handle, op, token=0)
+                err["errorPage0"] = err_page0
+            except Exception:
+                pass
+            return err
 
         pages: List[Dict[str, Any]] = []
         rows_collected = 0
@@ -110,12 +171,12 @@ def build_server() -> FastMCP:
 
         stop_result: Optional[Dict[str, Any]] = None
         if jid:
-            stop_exec = client.execute_statement(session_handle, f"STOP JOB {jid}")
+            stop_exec = client.execute_statement(session_handle, f"STOP JOB '{jid}'")
             stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
             if isinstance(stop_op, dict):
                 stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
             if isinstance(stop_op, str):
-                _ = _poll_status(session_handle, stop_op, 30.0, 0.5)
+                _, _ = _poll_status(session_handle, stop_op, 30.0, 0.5)
             stop_result = {"ok": True}
 
         try:
@@ -139,19 +200,44 @@ def build_server() -> FastMCP:
         """Start a streaming query and return its cluster jobID; leaves the job running."""
         session_handle = _ensure_session()
 
-        exec_resp = client.execute_statement(session_handle, query)
-        op = exec_resp.get("operationHandle") or exec_resp.get("operation_handle")
-        if isinstance(op, dict):
-            op = op.get("identifier") or op.get("handle") or op.get("id")
+        try:
+            exec_resp = client.execute_statement(session_handle, query)
+        except Exception as e:
+            return {
+                "errorType": "EXECUTE_EXCEPTION",
+                "message": str(e),
+            }
+        op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
             return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
 
-        status = _poll_status(session_handle, op, 60.0, 0.5)
+        status, status_payload = _poll_status(session_handle, op, 60.0, 0.5)
         if status != "FINISHED":
-            return {"errorType": f"OPERATION_{status}", "message": "operation did not finish successfully"}
+            err: Dict[str, Any] = {
+                "errorType": f"OPERATION_{status}",
+                "message": "operation did not finish successfully",
+                "status": status,
+                "statusPayload": status_payload,
+            }
+            try:
+                err_page0 = client.fetch_result(session_handle, op, token=0)
+                err["errorPage0"] = err_page0
+            except Exception:
+                pass
+            return err
 
-        page0 = client.fetch_result(session_handle, op, token=0)
-        jid = _extract_job_id(page0)
+        # Try to read jobID from token 0; if NOT_READY, retry a few times
+        retries = 20
+        jid: Optional[str] = None
+        page0: Dict[str, Any] = {}
+        while retries > 0:
+            page0 = client.fetch_result(session_handle, op, token=0)
+            jid = _extract_job_id(page0)
+            rtype = str(page0.get("resultType") or "").upper()
+            if jid or rtype != "NOT_READY":
+                break
+            time.sleep(0.25)
+            retries -= 1
         if not isinstance(jid, str):
             return {"errorType": "JOB_ID_NOT_AVAILABLE", "message": "job id not present in results"}
 
@@ -164,15 +250,30 @@ def build_server() -> FastMCP:
         """Issue STOP JOB <job_id> and remove internal tracking state for that job."""
         session_handle = _ensure_session()
 
-        stop_exec = client.execute_statement(session_handle, f"STOP JOB {job_id}")
+        logger.debug("cancel_job: submitting STOP JOB %s", job_id)
+        stop_exec = client.execute_statement(session_handle, f"STOP JOB '{job_id}'")
         stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
         if isinstance(stop_op, dict):
             stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
         if isinstance(stop_op, str):
-            _ = _poll_status(session_handle, stop_op, 30.0, 0.5)
+            status, payload = _poll_status(session_handle, stop_op, 30.0, 0.5)
+            logger.debug("cancel_job: STOP operation status=%s payload=%s", status, payload)
+
+        # Wait until job is no longer running according to DESCRIBE JOB
+        logger.debug("cancel_job: waiting for job %s to stop (DESCRIBE JOB)", job_id)
+        deadline = time.time() + 60.0
+        job_gone = False
+        last_status: Optional[str] = None
+        while time.time() < deadline:
+            last_status = _job_status(session_handle, job_id)
+            if last_status is None or str(last_status).strip().upper() != "RUNNING":
+                job_gone = True
+                break
+            time.sleep(1.0)
+        logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
         _stream_index.pop(job_id, None)
-        return {"jobID": job_id, "status": "STOP_SUBMITTED"}
+        return {"jobID": job_id, "status": "STOP_SUBMITTED", "jobGone": job_gone, "jobStatus": last_status}
     setattr(server, "cancel_job", cancel_job)
 
     @server.tool()
