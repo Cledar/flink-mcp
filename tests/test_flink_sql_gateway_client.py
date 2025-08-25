@@ -1,9 +1,6 @@
-import os
-import time
 from typing import Callable
 
 import httpx
-import pytest
 
 from flink_mcp.flink_sql_gateway_client import FlinkSqlGatewayClient
 
