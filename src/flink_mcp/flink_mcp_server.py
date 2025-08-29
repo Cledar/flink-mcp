@@ -14,7 +14,7 @@ from .flink_sql_gateway_client import FlinkSqlGatewayClient
 def build_server() -> FastMCP:
     load_dotenv()
 
-    server = FastMCP("Flink SQLGateway MCP Server v0.2.0")
+    server = FastMCP("Flink SQLGateway MCP Server v0.2.2")
 
     logger = logging.getLogger(__name__)
 
@@ -141,7 +141,10 @@ def build_server() -> FastMCP:
         max_rows: int = 5,
         max_seconds: float = 15.0,
     ) -> Dict[str, Any]:
-        """Run a short-lived query, fetch up to max_rows within max_seconds, then stop the job if present."""
+        """Run a short-lived query, concatenate results.data until max_rows, then stop the job.
+
+        Returns a compact payload: { "columns": [...], "data": [...] }.
+        """
         deadline = time.time() + max_seconds
 
         try:
@@ -170,45 +173,48 @@ def build_server() -> FastMCP:
                 pass
             return err
 
-        pages: List[Dict[str, Any]] = []
-        rows_collected = 0
+        data_accum: List[Any] = []
+        columns: Optional[List[Any]] = None
         token = 0
         jid: Optional[str] = None
 
-        while rows_collected < max_rows and time.time() < deadline:
+        while len(data_accum) < max_rows and time.time() < deadline:
             page = client.fetch_result(session_handle, op, token=token)
-            pages.append(page)
             if jid is None:
                 jid = _extract_job_id(page)
             rtype = str(page.get("resultType") or "").upper()
             if rtype == "NOT_READY":
                 time.sleep(0.25)
                 continue
-            data = (page.get("results") or {}).get("data") or []
-            rows_collected += len(data) if isinstance(data, list) else 0
+
+            res = page.get("results") or {}
+            if columns is None:
+                cols = res.get("columns") or []
+                if isinstance(cols, list) and cols:
+                    columns = cols
+
+            page_data = res.get("data") or []
+            if isinstance(page_data, list) and page_data:
+                need = max_rows - len(data_accum)
+                if need > 0:
+                    data_accum.extend(page_data[:need])
+                # Stop polling as soon as we reached the quota
+                if len(data_accum) >= max_rows:
+                    break
+
             token += 1
             if rtype == "EOS":
                 break
 
-        stop_result: Optional[Dict[str, Any]] = None
         if jid:
             _submit_stop_job(session_handle, jid, 30.0, 0.5)
-            stop_result = {"ok": True}
 
         try:
             client.close_operation(session_handle, op)
         except Exception:
             pass
 
-        out: Dict[str, Any] = {
-            "jobID": jid,
-            "pages": pages,
-            "rowsCollected": rows_collected,
-            "nextToken": token,
-        }
-        if stop_result is not None:
-            out["stopResult"] = stop_result
-        return out
+        return {"columns": (columns or []), "data": data_accum}
     setattr(server, "run_query_collect_and_stop", run_query_collect_and_stop)
 
     @server.tool()
