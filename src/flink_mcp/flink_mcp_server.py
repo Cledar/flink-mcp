@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, List, Tuple
 import logging
 
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from .flink_sql_gateway_client import FlinkSqlGatewayClient
 
@@ -120,19 +120,16 @@ def build_server() -> FastMCP:
     def _open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Open a new session and return { sessionHandle, ... }."""
         return client.open_session(properties or {})
-    setattr(server, "open_new_session", _open_new_session)
 
     @server.tool()
     def get_config(session_handle: str) -> Dict[str, Any]:
         """Return current session configuration (properties) for the given session."""
         return client.get_session(session_handle)
-    setattr(server, "get_config", get_config)
 
     @server.tool()
     def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
         """Apply a single session-scoped DDL/config statement (CREATE/USE/SET/RESET/etc.)."""
         return client.configure_session(session_handle=session_handle, statement=statement)
-    setattr(server, "configure_session", configure_session)
 
     @server.tool()
     def run_query_collect_and_stop(
@@ -215,7 +212,6 @@ def build_server() -> FastMCP:
             pass
 
         return {"columns": (columns or []), "data": data_accum}
-    setattr(server, "run_query_collect_and_stop", run_query_collect_and_stop)
 
     @server.tool()
     def run_query_stream_start(session_handle: str, query: str) -> Dict[str, Any]:
@@ -263,7 +259,6 @@ def build_server() -> FastMCP:
             return {"errorType": "JOB_ID_NOT_AVAILABLE", "message": "job id not present in results"}
 
         return {"jobID": jid, "operationHandle": op}
-    setattr(server, "run_query_stream_start", run_query_stream_start)
 
     @server.tool()
     def cancel_job(session_handle: str, job_id: str) -> Dict[str, Any]:
@@ -280,7 +275,6 @@ def build_server() -> FastMCP:
         logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
         return {"jobID": job_id, "status": "STOP_SUBMITTED", "jobGone": job_gone, "jobStatus": last_status}
-    setattr(server, "cancel_job", cancel_job)
 
     @server.tool()
     def fetch_result_page(session_handle: str, operation_handle: str, token: int) -> Dict[str, Any]:
@@ -288,7 +282,6 @@ def build_server() -> FastMCP:
         page = client.fetch_result(session_handle, operation_handle, token=token)
         rtype = str(page.get("resultType") or "").upper()
         return {"page": page, "isEnd": rtype == "EOS", "nextToken": token + 1}
-    setattr(server, "fetch_result_page", fetch_result_page)
 
     @server.prompt()
     def manage_session() -> str:

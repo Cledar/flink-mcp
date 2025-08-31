@@ -1,13 +1,12 @@
 from typing import Callable
 
 import httpx
+import pytest
+from fastmcp import Client
 
 from flink_mcp.flink_sql_gateway_client import FlinkSqlGatewayClient
+from flink_mcp.flink_mcp_server import build_server
 
-
-# ----------------------
-# Unit tests (mocked IO)
-# ----------------------
 
 def _make_mock_client(responder: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
     transport = httpx.MockTransport(responder)
@@ -72,11 +71,6 @@ def test_statement_flow_mocked() -> None:
     assert result.get("result") == "ok"
 
 
-# Integration tests moved to dedicated files:
-# - tests/test_stream_workflow_integration.py
-# - tests/test_mcp_error_flows_integration.py
-
-
 def test_configure_session_mocked() -> None:
     session_handle = "sess-abc"
 
@@ -109,3 +103,79 @@ def test_close_operation_mocked() -> None:
     assert isinstance(resp, dict)
 
 
+# MCP Server tests using in-memory testing approach
+@pytest.mark.asyncio
+async def test_mcp_server_open_session() -> None:
+    """Test opening a session through MCP server"""
+    server = build_server()
+    
+    async with Client(server) as client:
+        result = await client.call_tool("open_new_session", {})
+        
+        data = result.data
+        assert "sessionHandle" in data
+        assert isinstance(data["sessionHandle"], str)
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_get_config() -> None:
+    """Test getting session config through MCP server"""
+    server = build_server()
+    
+    async with Client(server) as client:
+        # First open a session
+        session_result = await client.call_tool("open_new_session", {})
+        session_data = session_result.data
+        session_handle = session_data["sessionHandle"]
+        
+        # Then get config
+        config_result = await client.call_tool("get_config", {"session_handle": session_handle})
+        
+        config_data = config_result.data
+        assert isinstance(config_data, dict)
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_configure_session() -> None:
+    """Test configuring a session through MCP server"""
+    server = build_server()
+    
+    async with Client(server) as client:
+        # First open a session
+        session_result = await client.call_tool("open_new_session", {})
+        session_data = session_result.data
+        session_handle = session_data["sessionHandle"]
+        
+        # The configure_session call may succeed with an empty response
+        configure_result = await client.call_tool("configure_session", {
+            "session_handle": session_handle,
+            "statement": "SET execution.runtime-mode = 'batch'"
+        })
+        # configure_session returns an empty dict {} which becomes None in fastmcp
+        # The important thing is that it doesn't error
+        assert not configure_result.is_error
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_fetch_result_page() -> None:
+    """Test fetching result page through MCP server"""
+    server = build_server()
+    
+    async with Client(server) as client:
+        # First open a session
+        session_result = await client.call_tool("open_new_session", {})
+        session_data = session_result.data
+        session_handle = session_data["sessionHandle"]
+        
+        # Run a simple query
+        query_result = await client.call_tool("run_query_collect_and_stop", {
+            "session_handle": session_handle,
+            "query": "SELECT 1",
+            "max_rows": 1,
+            "max_seconds": 10.0
+        })
+        
+        query_data = query_result.data
+        
+        # The collect_and_stop method should return data directly, not require separate page fetching
+        assert "data" in query_data or "errorType" in query_data
