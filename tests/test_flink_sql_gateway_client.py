@@ -8,12 +8,13 @@ from flink_mcp.flink_sql_gateway_client import FlinkSqlGatewayClient
 
 def _make_mock_client(
     responder: Callable[[httpx.Request], httpx.Response],
-) -> httpx.Client:
+) -> httpx.AsyncClient:
     transport = httpx.MockTransport(responder)
-    return httpx.Client(transport=transport)
+    return httpx.AsyncClient(transport=transport)
 
 
-def test_get_info_mocked() -> None:
+@pytest.mark.asyncio
+async def test_get_info_mocked() -> None:
     def responder(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
         assert request.url.path == "/v3/info"
@@ -24,12 +25,13 @@ def test_get_info_mocked() -> None:
     client = FlinkSqlGatewayClient(
         base_url="http://mock", client=_make_mock_client(responder)
     )
-    info = client.get_info()
+    info = await client.get_info()
     assert isinstance(info, dict)
     assert info.get("version") == "test"
 
 
-def test_statement_flow_mocked() -> None:
+@pytest.mark.asyncio
+async def test_statement_flow_mocked() -> None:
     session_handle = "session-123"
     operation_handle = "op-456"
 
@@ -73,20 +75,21 @@ def test_statement_flow_mocked() -> None:
         base_url="http://mock", client=_make_mock_client(responder)
     )
 
-    created = client.open_session()
+    created = await client.open_session()
     assert created.get("sessionHandle") == session_handle
 
-    submitted = client.execute_statement(session_handle, "SELECT 1")
+    submitted = await client.execute_statement(session_handle, "SELECT 1")
     assert submitted.get("operationHandle") == operation_handle
 
-    status = client.get_operation_status(session_handle, operation_handle)
+    status = await client.get_operation_status(session_handle, operation_handle)
     assert status.get("status", {}).get("status") == "FINISHED"
 
-    result = client.fetch_result(session_handle, operation_handle, token=0)
+    result = await client.fetch_result(session_handle, operation_handle, token=0)
     assert result.get("result") == "ok"
 
 
-def test_configure_session_mocked() -> None:
+@pytest.mark.asyncio
+async def test_configure_session_mocked() -> None:
     session_handle = "sess-abc"
 
     def responder(request: httpx.Request) -> httpx.Response:
@@ -103,13 +106,14 @@ def test_configure_session_mocked() -> None:
     client = FlinkSqlGatewayClient(
         base_url="http://mock", client=_make_mock_client(responder)
     )
-    created = client.open_session()
+    created = await client.open_session()
     assert created.get("sessionHandle") == session_handle
-    resp = client.configure_session(session_handle, "USE CATALOG default_catalog")
+    resp = await client.configure_session(session_handle, "USE CATALOG default_catalog")
     assert isinstance(resp, dict)
 
 
-def test_close_operation_mocked() -> None:
+@pytest.mark.asyncio
+async def test_close_operation_mocked() -> None:
     session_handle = "sess-1"
     operation_handle = "op-2"
 
@@ -125,7 +129,7 @@ def test_close_operation_mocked() -> None:
     client = FlinkSqlGatewayClient(
         base_url="http://mock", client=_make_mock_client(responder)
     )
-    resp = client.close_operation(session_handle, operation_handle)
+    resp = await client.close_operation(session_handle, operation_handle)
     assert isinstance(resp, dict)
 
 

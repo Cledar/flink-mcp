@@ -24,12 +24,14 @@ async def _ensure_datagen_table(client: Client, session_handle: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_run_query_collect_and_stop_success(client, session_handle) -> None:
+async def test_run_query_collect_and_stop_success(
+    integration_client, integration_session_handle
+) -> None:
     # Run query
-    query_result = await client.call_tool(
+    query_result = await integration_client.call_tool(
         "run_query_collect_and_stop",
         {
-            "session_handle": session_handle,
+            "session_handle": integration_session_handle,
             "query": "SELECT 1",
             "max_rows": 5,
             "max_seconds": 10.0,
@@ -44,15 +46,18 @@ async def test_run_query_collect_and_stop_success(client, session_handle) -> Non
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_query_stream_start_with_datagen_then_cancel(
-    client, session_handle
+    integration_client, integration_session_handle
 ) -> None:
     # Setup datagen table
-    await _ensure_datagen_table(client, session_handle)
+    await _ensure_datagen_table(integration_client, integration_session_handle)
 
     # Start streaming query
-    start_result = await client.call_tool(
+    start_result = await integration_client.call_tool(
         "run_query_stream_start",
-        {"session_handle": session_handle, "query": "SELECT id, ts FROM gen_stream"},
+        {
+            "session_handle": integration_session_handle,
+            "query": "SELECT id, ts FROM gen_stream",
+        },
     )
 
     start_data = start_result.data
@@ -68,16 +73,20 @@ async def test_run_query_stream_start_with_datagen_then_cancel(
     assert isinstance(op, str) and op
 
     # Fetch one page
-    page_result = await client.call_tool(
+    page_result = await integration_client.call_tool(
         "fetch_result_page",
-        {"session_handle": session_handle, "operation_handle": op, "token": 1},
+        {
+            "session_handle": integration_session_handle,
+            "operation_handle": op,
+            "token": 1,
+        },
     )
     page_data = page_result.data
     assert "page" in page_data
 
     # Cancel job
-    cancel_result = await client.call_tool(
-        "cancel_job", {"session_handle": session_handle, "job_id": job_id}
+    cancel_result = await integration_client.call_tool(
+        "cancel_job", {"session_handle": integration_session_handle, "job_id": job_id}
     )
 
     cancel_data = cancel_result.data
@@ -87,12 +96,14 @@ async def test_run_query_stream_start_with_datagen_then_cancel(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_run_query_collect_and_stop_error_flow(client, session_handle) -> None:
+async def test_run_query_collect_and_stop_error_flow(
+    integration_client, integration_session_handle
+) -> None:
     # Run invalid query
-    query_result = await client.call_tool(
+    query_result = await integration_client.call_tool(
         "run_query_collect_and_stop",
         {
-            "session_handle": session_handle,
+            "session_handle": integration_session_handle,
             "query": "SELECT * FROM no_such_table",
             "max_rows": 5,
             "max_seconds": 5.0,
@@ -110,11 +121,16 @@ async def test_run_query_collect_and_stop_error_flow(client, session_handle) -> 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_run_query_stream_start_error_flow(client, session_handle) -> None:
+async def test_run_query_stream_start_error_flow(
+    integration_client, integration_session_handle
+) -> None:
     # Run invalid streaming query
-    stream_result = await client.call_tool(
+    stream_result = await integration_client.call_tool(
         "run_query_stream_start",
-        {"session_handle": session_handle, "query": "SELECT * FROM no_such_table"},
+        {
+            "session_handle": integration_session_handle,
+            "query": "SELECT * FROM no_such_table",
+        },
     )
 
     result_data = stream_result.data
