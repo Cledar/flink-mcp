@@ -1,59 +1,69 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
-from typing import Any, Dict, Optional, List, Tuple
-import logging
+import asyncio
+from typing import Any, Dict, List, Optional, Tuple
 
+import httpx
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from .flink_sql_gateway_client import FlinkSqlGatewayClient
 
 
-def build_server() -> FastMCP:
+def build_server(
+    base_url: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
+) -> FastMCP:
     load_dotenv()
 
-    server = FastMCP("Flink SQLGateway MCP Server v0.2.2")
+    server = FastMCP("Flink SQLGateway MCP Server v0.2.3")
 
     logger = logging.getLogger(__name__)
 
-    client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
+    # Allow tests to inject a mocked HTTP client and/or base URL.
+    effective_base_url = base_url or os.getenv("SQL_GATEWAY_API_BASE_URL")
+    client = FlinkSqlGatewayClient(effective_base_url, client=http_client)
 
-
-    def _poll_status(
+    async def _poll_status(
         session_handle: str, operation_handle: str, timeout: float, interval: float
     ) -> Tuple[str, Dict[str, Any]]:
         end = time.time() + timeout
         last_payload: Dict[str, Any] = {}
         while time.time() < end:
-            last_payload = client.get_operation_status(session_handle, operation_handle)
+            last_payload = await client.get_operation_status(
+                session_handle, operation_handle
+            )
             status = str(last_payload.get("status", "")).upper()
             if status in {"FINISHED", "ERROR", "CANCELED", "CLOSED"}:
                 return status, last_payload
-            time.sleep(interval)
+            await asyncio.sleep(interval)
         return "TIMEOUT", last_payload
 
     def _extract_job_id(page: Dict[str, Any]) -> Optional[str]:
         j = page.get("jobID") or page.get("jobId")
         return j if isinstance(j, str) else None
 
-    def _job_status(session_handle: str, job_id: str) -> Optional[str]:
+    async def _job_status(session_handle: str, job_id: str) -> Optional[str]:
         """Return current cluster job status via DESCRIBE JOB, or None if unavailable.
 
         Extracts the value of the "status" column from the first row of the result.
         """
         try:
-            exec_resp = client.execute_statement(session_handle, f"DESCRIBE JOB '{job_id}'")
+            exec_resp = await client.execute_statement(
+                session_handle, f"DESCRIBE JOB '{job_id}'"
+            )
             op = exec_resp.get("operationHandle") or exec_resp.get("operation_handle")
             if isinstance(op, dict):
                 op = op.get("identifier") or op.get("handle") or op.get("id")
             if not isinstance(op, str):
                 return None
-            status, _ = _poll_status(session_handle, op, 10.0, 0.5)
+            status, _ = await _poll_status(session_handle, op, 10.0, 0.5)
             if status != "FINISHED":
                 return None
-            page0 = client.fetch_result(session_handle, op, token=0)
+            page0 = await client.fetch_result(session_handle, op, token=0)
             results = page0.get("results") or {}
             columns = results.get("columns") or []
             status_idx = None
@@ -78,22 +88,26 @@ def build_server() -> FastMCP:
         except Exception:
             return None
 
-    def _submit_stop_job(
+    async def _submit_stop_job(
         session_handle: str, job_id: str, timeout: float = 30.0, interval: float = 0.5
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
         """Submit STOP JOB for a given job and poll the stop operation until terminal status.
 
         Returns a tuple of (status, payload) if an operation handle is available, otherwise None.
         """
-        stop_exec = client.execute_statement(session_handle, f"STOP JOB '{job_id}'")
+        stop_exec = await client.execute_statement(
+            session_handle, f"STOP JOB '{job_id}'"
+        )
         stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
         if isinstance(stop_op, dict):
-            stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
+            stop_op = (
+                stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
+            )
         if isinstance(stop_op, str):
-            return _poll_status(session_handle, stop_op, timeout, interval)
+            return await _poll_status(session_handle, stop_op, timeout, interval)
         return None
 
-    def _wait_job_stopped(
+    async def _wait_job_stopped(
         session_handle: str, job_id: str, timeout: float = 60.0, interval: float = 1.0
     ) -> Tuple[bool, Optional[str]]:
         """Wait until DESCRIBE JOB reports the job is not RUNNING (or job is gone).
@@ -104,38 +118,39 @@ def build_server() -> FastMCP:
         job_gone = False
         last_status: Optional[str] = None
         while time.time() < deadline:
-            last_status = _job_status(session_handle, job_id)
+            last_status = await _job_status(session_handle, job_id)
             if last_status is None or str(last_status).strip().upper() != "RUNNING":
                 job_gone = True
                 break
-            time.sleep(interval)
+            await asyncio.sleep(interval)
         return job_gone, last_status
 
     @server.resource("https://mcp.local/flink/info")
-    def flink_info() -> Dict[str, Any]:
+    async def flink_info() -> Dict[str, Any]:
         """Return basic cluster information from the SQL Gateway /v1/info endpoint."""
-        return client.get_info()
+        return await client.get_info()
 
-    @server.tool(name="open_new_session")
-    def _open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    @server.tool()
+    async def open_new_session(
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Open a new session and return { sessionHandle, ... }."""
-        return client.open_session(properties or {})
-    setattr(server, "open_new_session", _open_new_session)
+        return await client.open_session(properties or {})
 
     @server.tool()
-    def get_config(session_handle: str) -> Dict[str, Any]:
+    async def get_config(session_handle: str) -> Dict[str, Any]:
         """Return current session configuration (properties) for the given session."""
-        return client.get_session(session_handle)
-    setattr(server, "get_config", get_config)
+        return await client.get_session(session_handle)
 
     @server.tool()
-    def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
+    async def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
         """Apply a single session-scoped DDL/config statement (CREATE/USE/SET/RESET/etc.)."""
-        return client.configure_session(session_handle=session_handle, statement=statement)
-    setattr(server, "configure_session", configure_session)
+        return await client.configure_session(
+            session_handle=session_handle, statement=statement
+        )
 
     @server.tool()
-    def run_query_collect_and_stop(
+    async def run_query_collect_and_stop(
         session_handle: str,
         query: str,
         max_rows: int = 5,
@@ -148,7 +163,7 @@ def build_server() -> FastMCP:
         deadline = time.time() + max_seconds
 
         try:
-            exec_resp = client.execute_statement(session_handle, query)
+            exec_resp = await client.execute_statement(session_handle, query)
         except Exception as e:
             return {
                 "errorType": "EXECUTE_EXCEPTION",
@@ -156,9 +171,14 @@ def build_server() -> FastMCP:
             }
         op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
-            return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
+            return {
+                "errorType": "NO_OPERATION_HANDLE",
+                "message": "execute returned no handle",
+            }
 
-        status, status_payload = _poll_status(session_handle, op, max(0.0, deadline - time.time()), 0.5)
+        status, status_payload = await _poll_status(
+            session_handle, op, max(0.0, deadline - time.time()), 0.5
+        )
         if status != "FINISHED":
             err: Dict[str, Any] = {
                 "errorType": f"OPERATION_{status}",
@@ -167,7 +187,7 @@ def build_server() -> FastMCP:
                 "statusPayload": status_payload,
             }
             try:
-                err_page0 = client.fetch_result(session_handle, op, token=0)
+                err_page0 = await client.fetch_result(session_handle, op, token=0)
                 err["errorPage0"] = err_page0
             except Exception:
                 pass
@@ -179,12 +199,12 @@ def build_server() -> FastMCP:
         jid: Optional[str] = None
 
         while len(data_accum) < max_rows and time.time() < deadline:
-            page = client.fetch_result(session_handle, op, token=token)
+            page = await client.fetch_result(session_handle, op, token=token)
             if jid is None:
                 jid = _extract_job_id(page)
             rtype = str(page.get("resultType") or "").upper()
             if rtype == "NOT_READY":
-                time.sleep(0.25)
+                await asyncio.sleep(0.25)
                 continue
 
             res = page.get("results") or {}
@@ -207,22 +227,21 @@ def build_server() -> FastMCP:
                 break
 
         if jid:
-            _submit_stop_job(session_handle, jid, 30.0, 0.5)
+            await _submit_stop_job(session_handle, jid, 30.0, 0.5)
 
         try:
-            client.close_operation(session_handle, op)
+            await client.close_operation(session_handle, op)
         except Exception:
             pass
 
         return {"columns": (columns or []), "data": data_accum}
-    setattr(server, "run_query_collect_and_stop", run_query_collect_and_stop)
 
     @server.tool()
-    def run_query_stream_start(session_handle: str, query: str) -> Dict[str, Any]:
+    async def run_query_stream_start(session_handle: str, query: str) -> Dict[str, Any]:
         """Start a streaming query and return its cluster jobID; leaves the job running."""
 
         try:
-            exec_resp = client.execute_statement(session_handle, query)
+            exec_resp = await client.execute_statement(session_handle, query)
         except Exception as e:
             return {
                 "errorType": "EXECUTE_EXCEPTION",
@@ -230,9 +249,12 @@ def build_server() -> FastMCP:
             }
         op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
-            return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
+            return {
+                "errorType": "NO_OPERATION_HANDLE",
+                "message": "execute returned no handle",
+            }
 
-        status, status_payload = _poll_status(session_handle, op, 60.0, 0.5)
+        status, status_payload = await _poll_status(session_handle, op, 60.0, 0.5)
         if status != "FINISHED":
             err: Dict[str, Any] = {
                 "errorType": f"OPERATION_{status}",
@@ -241,7 +263,7 @@ def build_server() -> FastMCP:
                 "statusPayload": status_payload,
             }
             try:
-                err_page0 = client.fetch_result(session_handle, op, token=0)
+                err_page0 = await client.fetch_result(session_handle, op, token=0)
                 err["errorPage0"] = err_page0
             except Exception:
                 pass
@@ -252,43 +274,54 @@ def build_server() -> FastMCP:
         jid: Optional[str] = None
         page0: Dict[str, Any] = {}
         while retries > 0:
-            page0 = client.fetch_result(session_handle, op, token=0)
+            page0 = await client.fetch_result(session_handle, op, token=0)
             jid = _extract_job_id(page0)
             rtype = str(page0.get("resultType") or "").upper()
             if jid or rtype != "NOT_READY":
                 break
-            time.sleep(0.25)
+            await asyncio.sleep(0.25)
             retries -= 1
         if not isinstance(jid, str):
-            return {"errorType": "JOB_ID_NOT_AVAILABLE", "message": "job id not present in results"}
+            return {
+                "errorType": "JOB_ID_NOT_AVAILABLE",
+                "message": "job id not present in results",
+            }
 
         return {"jobID": jid, "operationHandle": op}
-    setattr(server, "run_query_stream_start", run_query_stream_start)
 
     @server.tool()
-    def cancel_job(session_handle: str, job_id: str) -> Dict[str, Any]:
+    async def cancel_job(session_handle: str, job_id: str) -> Dict[str, Any]:
         """Issue STOP JOB <job_id> and remove internal tracking state for that job."""
         logger.debug("cancel_job: submitting STOP JOB %s", job_id)
-        stop_status = _submit_stop_job(session_handle, job_id, 30.0, 0.5)
+        stop_status = await _submit_stop_job(session_handle, job_id, 30.0, 0.5)
         if stop_status is not None:
             status, payload = stop_status
-            logger.debug("cancel_job: STOP operation status=%s payload=%s", status, payload)
+            logger.debug(
+                "cancel_job: STOP operation status=%s payload=%s", status, payload
+            )
 
         # Wait until job is no longer running according to DESCRIBE JOB
         logger.debug("cancel_job: waiting for job %s to stop (DESCRIBE JOB)", job_id)
-        job_gone, last_status = _wait_job_stopped(session_handle, job_id, 60.0, 1.0)
+        job_gone, last_status = await _wait_job_stopped(
+            session_handle, job_id, 60.0, 1.0
+        )
         logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
-        return {"jobID": job_id, "status": "STOP_SUBMITTED", "jobGone": job_gone, "jobStatus": last_status}
-    setattr(server, "cancel_job", cancel_job)
+        return {
+            "jobID": job_id,
+            "status": "STOP_SUBMITTED",
+            "jobGone": job_gone,
+            "jobStatus": last_status,
+        }
 
     @server.tool()
-    def fetch_result_page(session_handle: str, operation_handle: str, token: int) -> Dict[str, Any]:
+    async def fetch_result_page(
+        session_handle: str, operation_handle: str, token: int
+    ) -> Dict[str, Any]:
         """Fetch a single page for the given operation handle and token."""
-        page = client.fetch_result(session_handle, operation_handle, token=token)
+        page = await client.fetch_result(session_handle, operation_handle, token=token)
         rtype = str(page.get("resultType") or "").upper()
         return {"page": page, "isEnd": rtype == "EOS", "nextToken": token + 1}
-    setattr(server, "fetch_result_page", fetch_result_page)
 
     @server.prompt()
     def manage_session() -> str:
@@ -296,6 +329,7 @@ def build_server() -> FastMCP:
             "If you do not have a valid 'sessionHandle', call open_new_session() first and remember the handle. "
             "If a session has expired or is invalid, create a new one and continue."
         )
+
     return server
 
 
@@ -306,7 +340,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-

@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, Optional
 
 import httpx
+from httpx import AsyncClient
 
 
 class FlinkSqlGatewayClient:
@@ -19,40 +20,45 @@ class FlinkSqlGatewayClient:
         base_url: Optional[str] = None,
         *,
         timeout_seconds: float = 30.0,
-        client: Optional[httpx.Client] = None,
+        client: Optional[AsyncClient] = None,
     ) -> None:
-        configured_base_url = base_url or os.getenv("SQL_GATEWAY_API_BASE_URL", "http://localhost:8083")
+        configured_base_url = base_url or os.getenv(
+            "SQL_GATEWAY_API_BASE_URL", "http://localhost:8083"
+        )
         self._base_url = configured_base_url.rstrip("/")
-        self._client = client or httpx.Client(timeout=timeout_seconds)
+        self._client: AsyncClient = client or AsyncClient(timeout=timeout_seconds)
 
     def _url(self, path: str) -> str:
         if not path.startswith("/"):
             path = f"/{path}"
         return f"{self._base_url}{path}"
 
-
-    def get_info(self) -> Dict[str, Any]:
+    async def get_info(self) -> Dict[str, Any]:
         """GET /v3/info, returns cluster metadata (e.g., productName, version)."""
-        response = self._client.get(self._url("/v3/info"))
+        response = await self._client.get(self._url("/v3/info"))
         response.raise_for_status()
         return response.json()
 
-    def open_session(self, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def open_session(
+        self, properties: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """POST /v3/sessions. Opens a session and returns a payload including sessionHandle."""
         payload: Dict[str, Any] = {}
         if properties:
             payload["properties"] = properties
-        response = self._client.post(self._url("/v3/sessions"), json=payload or None)
+        response = await self._client.post(
+            self._url("/v3/sessions"), json=payload or None
+        )
         response.raise_for_status()
         return response.json()
 
-    def get_session(self, session_handle: str) -> Dict[str, Any]:
+    async def get_session(self, session_handle: str) -> Dict[str, Any]:
         """GET /v3/sessions/{session}. Returns session configuration (properties)."""
-        response = self._client.get(self._url(f"/v3/sessions/{session_handle}"))
+        response = await self._client.get(self._url(f"/v3/sessions/{session_handle}"))
         response.raise_for_status()
         return response.json()
 
-    def configure_session(
+    async def configure_session(
         self,
         session_handle: str,
         statement: str,
@@ -62,7 +68,9 @@ class FlinkSqlGatewayClient:
         payload: Dict[str, Any] = {"statement": statement}
         if execution_timeout_ms:
             payload["executionTimeout"] = execution_timeout_ms
-        response = self._client.post(self._url(f"/v3/sessions/{session_handle}/configure-session"), json=payload)
+        response = await self._client.post(
+            self._url(f"/v3/sessions/{session_handle}/configure-session"), json=payload
+        )
         # Some gateways may return empty body on success
         try:
             response.raise_for_status()
@@ -72,7 +80,7 @@ class FlinkSqlGatewayClient:
         except Exception:
             return {"status": "OK"}
 
-    def execute_statement(
+    async def execute_statement(
         self,
         session_handle: str,
         statement: str,
@@ -83,22 +91,26 @@ class FlinkSqlGatewayClient:
         payload: Dict[str, Any] = {"statement": statement}
         if execution_config:
             payload["executionConfig"] = execution_config
-        response = self._client.post(
+        response = await self._client.post(
             self._url(f"/v3/sessions/{session_handle}/statements"),
             json=payload,
         )
         response.raise_for_status()
         return response.json()
 
-    def get_operation_status(self, session_handle: str, operation_handle: str) -> Dict[str, Any]:
+    async def get_operation_status(
+        self, session_handle: str, operation_handle: str
+    ) -> Dict[str, Any]:
         """GET /v3/sessions/{session}/operations/{operation}/status. Returns current status."""
-        response = self._client.get(
-            self._url(f"/v3/sessions/{session_handle}/operations/{operation_handle}/status")
+        response = await self._client.get(
+            self._url(
+                f"/v3/sessions/{session_handle}/operations/{operation_handle}/status"
+            )
         )
         response.raise_for_status()
         return response.json()
 
-    def fetch_result(
+    async def fetch_result(
         self,
         session_handle: str,
         operation_handle: str,
@@ -109,17 +121,21 @@ class FlinkSqlGatewayClient:
         GET /v3/sessions/{session}/operations/{operation}/result/{token}?rowFormat=JSON.
         Common response fields: resultType (NOT_READY | PAYLOAD | EOS), results, jobID (streaming).
         """
-        response = self._client.get(
+        response = await self._client.get(
             self._url(
                 f"/v3/sessions/{session_handle}/operations/{operation_handle}/result/{token}?rowFormat=JSON"
             )
         )
         return response.json()
 
-    def close_operation(self, session_handle: str, operation_handle: str) -> Dict[str, Any]:
+    async def close_operation(
+        self, session_handle: str, operation_handle: str
+    ) -> Dict[str, Any]:
         """DELETE /v3/sessions/{session}/operations/{operation}/close. Closes and frees resources."""
-        response = self._client.delete(
-            self._url(f"/v3/sessions/{session_handle}/operations/{operation_handle}/close")
+        response = await self._client.delete(
+            self._url(
+                f"/v3/sessions/{session_handle}/operations/{operation_handle}/close"
+            )
         )
         try:
             response.raise_for_status()
@@ -129,9 +145,6 @@ class FlinkSqlGatewayClient:
         except Exception:
             return {"status": "CLOSED"}
 
-    def close(self) -> None:
-        """Close underlying HTTP client."""
-        self._client.close()
-
-
-
+    async def aclose(self) -> None:
+        """Close underlying HTTP async client."""
+        await self._client.aclose()

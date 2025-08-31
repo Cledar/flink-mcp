@@ -23,6 +23,9 @@ jobs:
       - name: Ruff lint
         run: uv run ruff check .
 
+      - name: Type check with pyrefly
+        run: uvx pyrefly check src/ tests/
+
       - name: Run unit tests (skip integration)
         run: uv run pytest -q -m "not integration"
 

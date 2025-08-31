@@ -9,4 +9,13 @@ wheels/
 # Virtual environments
 .venv
 
+# Claude Code local settings
+.claude/
+
+# Python version files
+.python-version
+
+# Direnv configuration
+.envrc
+
 flink-2.1.0
