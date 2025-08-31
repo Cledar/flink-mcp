@@ -20,7 +20,6 @@ def build_server() -> FastMCP:
 
     client = FlinkSqlGatewayClient(os.getenv("SQL_GATEWAY_API_BASE_URL"))
 
-
     def _poll_status(
         session_handle: str, operation_handle: str, timeout: float, interval: float
     ) -> Tuple[str, Dict[str, Any]]:
@@ -44,7 +43,9 @@ def build_server() -> FastMCP:
         Extracts the value of the "status" column from the first row of the result.
         """
         try:
-            exec_resp = client.execute_statement(session_handle, f"DESCRIBE JOB '{job_id}'")
+            exec_resp = client.execute_statement(
+                session_handle, f"DESCRIBE JOB '{job_id}'"
+            )
             op = exec_resp.get("operationHandle") or exec_resp.get("operation_handle")
             if isinstance(op, dict):
                 op = op.get("identifier") or op.get("handle") or op.get("id")
@@ -88,7 +89,9 @@ def build_server() -> FastMCP:
         stop_exec = client.execute_statement(session_handle, f"STOP JOB '{job_id}'")
         stop_op = stop_exec.get("operationHandle") or stop_exec.get("operation_handle")
         if isinstance(stop_op, dict):
-            stop_op = stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
+            stop_op = (
+                stop_op.get("identifier") or stop_op.get("handle") or stop_op.get("id")
+            )
         if isinstance(stop_op, str):
             return _poll_status(session_handle, stop_op, timeout, interval)
         return None
@@ -116,8 +119,8 @@ def build_server() -> FastMCP:
         """Return basic cluster information from the SQL Gateway /v1/info endpoint."""
         return client.get_info()
 
-    @server.tool(name="open_new_session")
-    def _open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    @server.tool()
+    def open_new_session(properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Open a new session and return { sessionHandle, ... }."""
         return client.open_session(properties or {})
 
@@ -129,7 +132,9 @@ def build_server() -> FastMCP:
     @server.tool()
     def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
         """Apply a single session-scoped DDL/config statement (CREATE/USE/SET/RESET/etc.)."""
-        return client.configure_session(session_handle=session_handle, statement=statement)
+        return client.configure_session(
+            session_handle=session_handle, statement=statement
+        )
 
     @server.tool()
     def run_query_collect_and_stop(
@@ -153,9 +158,14 @@ def build_server() -> FastMCP:
             }
         op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
-            return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
+            return {
+                "errorType": "NO_OPERATION_HANDLE",
+                "message": "execute returned no handle",
+            }
 
-        status, status_payload = _poll_status(session_handle, op, max(0.0, deadline - time.time()), 0.5)
+        status, status_payload = _poll_status(
+            session_handle, op, max(0.0, deadline - time.time()), 0.5
+        )
         if status != "FINISHED":
             err: Dict[str, Any] = {
                 "errorType": f"OPERATION_{status}",
@@ -226,7 +236,10 @@ def build_server() -> FastMCP:
             }
         op = exec_resp.get("operationHandle")
         if not isinstance(op, str):
-            return {"errorType": "NO_OPERATION_HANDLE", "message": "execute returned no handle"}
+            return {
+                "errorType": "NO_OPERATION_HANDLE",
+                "message": "execute returned no handle",
+            }
 
         status, status_payload = _poll_status(session_handle, op, 60.0, 0.5)
         if status != "FINISHED":
@@ -256,7 +269,10 @@ def build_server() -> FastMCP:
             time.sleep(0.25)
             retries -= 1
         if not isinstance(jid, str):
-            return {"errorType": "JOB_ID_NOT_AVAILABLE", "message": "job id not present in results"}
+            return {
+                "errorType": "JOB_ID_NOT_AVAILABLE",
+                "message": "job id not present in results",
+            }
 
         return {"jobID": jid, "operationHandle": op}
 
@@ -267,17 +283,26 @@ def build_server() -> FastMCP:
         stop_status = _submit_stop_job(session_handle, job_id, 30.0, 0.5)
         if stop_status is not None:
             status, payload = stop_status
-            logger.debug("cancel_job: STOP operation status=%s payload=%s", status, payload)
+            logger.debug(
+                "cancel_job: STOP operation status=%s payload=%s", status, payload
+            )
 
         # Wait until job is no longer running according to DESCRIBE JOB
         logger.debug("cancel_job: waiting for job %s to stop (DESCRIBE JOB)", job_id)
         job_gone, last_status = _wait_job_stopped(session_handle, job_id, 60.0, 1.0)
         logger.debug("cancel_job: job_gone=%s last_status=%s", job_gone, last_status)
 
-        return {"jobID": job_id, "status": "STOP_SUBMITTED", "jobGone": job_gone, "jobStatus": last_status}
+        return {
+            "jobID": job_id,
+            "status": "STOP_SUBMITTED",
+            "jobGone": job_gone,
+            "jobStatus": last_status,
+        }
 
     @server.tool()
-    def fetch_result_page(session_handle: str, operation_handle: str, token: int) -> Dict[str, Any]:
+    def fetch_result_page(
+        session_handle: str, operation_handle: str, token: int
+    ) -> Dict[str, Any]:
         """Fetch a single page for the given operation handle and token."""
         page = client.fetch_result(session_handle, operation_handle, token=token)
         rtype = str(page.get("resultType") or "").upper()
@@ -289,6 +314,7 @@ def build_server() -> FastMCP:
             "If you do not have a valid 'sessionHandle', call open_new_session() first and remember the handle. "
             "If a session has expired or is invalid, create a new one and continue."
         )
+
     return server
 
 
@@ -299,7 +325,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
-

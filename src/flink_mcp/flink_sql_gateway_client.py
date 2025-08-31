@@ -21,7 +21,9 @@ class FlinkSqlGatewayClient:
         timeout_seconds: float = 30.0,
         client: Optional[httpx.Client] = None,
     ) -> None:
-        configured_base_url = base_url or os.getenv("SQL_GATEWAY_API_BASE_URL", "http://localhost:8083")
+        configured_base_url = base_url or os.getenv(
+            "SQL_GATEWAY_API_BASE_URL", "http://localhost:8083"
+        )
         self._base_url = configured_base_url.rstrip("/")
         self._client = client or httpx.Client(timeout=timeout_seconds)
 
@@ -30,14 +32,15 @@ class FlinkSqlGatewayClient:
             path = f"/{path}"
         return f"{self._base_url}{path}"
 
-
     def get_info(self) -> Dict[str, Any]:
         """GET /v3/info, returns cluster metadata (e.g., productName, version)."""
         response = self._client.get(self._url("/v3/info"))
         response.raise_for_status()
         return response.json()
 
-    def open_session(self, properties: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def open_session(
+        self, properties: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """POST /v3/sessions. Opens a session and returns a payload including sessionHandle."""
         payload: Dict[str, Any] = {}
         if properties:
@@ -62,7 +65,9 @@ class FlinkSqlGatewayClient:
         payload: Dict[str, Any] = {"statement": statement}
         if execution_timeout_ms:
             payload["executionTimeout"] = execution_timeout_ms
-        response = self._client.post(self._url(f"/v3/sessions/{session_handle}/configure-session"), json=payload)
+        response = self._client.post(
+            self._url(f"/v3/sessions/{session_handle}/configure-session"), json=payload
+        )
         # Some gateways may return empty body on success
         try:
             response.raise_for_status()
@@ -90,10 +95,14 @@ class FlinkSqlGatewayClient:
         response.raise_for_status()
         return response.json()
 
-    def get_operation_status(self, session_handle: str, operation_handle: str) -> Dict[str, Any]:
+    def get_operation_status(
+        self, session_handle: str, operation_handle: str
+    ) -> Dict[str, Any]:
         """GET /v3/sessions/{session}/operations/{operation}/status. Returns current status."""
         response = self._client.get(
-            self._url(f"/v3/sessions/{session_handle}/operations/{operation_handle}/status")
+            self._url(
+                f"/v3/sessions/{session_handle}/operations/{operation_handle}/status"
+            )
         )
         response.raise_for_status()
         return response.json()
@@ -116,10 +125,14 @@ class FlinkSqlGatewayClient:
         )
         return response.json()
 
-    def close_operation(self, session_handle: str, operation_handle: str) -> Dict[str, Any]:
+    def close_operation(
+        self, session_handle: str, operation_handle: str
+    ) -> Dict[str, Any]:
         """DELETE /v3/sessions/{session}/operations/{operation}/close. Closes and frees resources."""
         response = self._client.delete(
-            self._url(f"/v3/sessions/{session_handle}/operations/{operation_handle}/close")
+            self._url(
+                f"/v3/sessions/{session_handle}/operations/{operation_handle}/close"
+            )
         )
         try:
             response.raise_for_status()
@@ -132,6 +145,3 @@ class FlinkSqlGatewayClient:
     def close(self) -> None:
         """Close underlying HTTP client."""
         self._client.close()
-
-
-
