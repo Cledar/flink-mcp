@@ -14,7 +14,7 @@ from .flink_sql_gateway_client import FlinkSqlGatewayClient
 def build_server() -> FastMCP:
     load_dotenv()
 
-    server = FastMCP("Flink SQLGateway MCP Server v0.2.2")
+    server = FastMCP("Flink SQLGateway MCP Server v0.2.3")
 
     logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 [project]
 name = "flink-mcp"
-version = "0.2.2"
+version = "0.2.3"
 
 description = "MCP server for Apache Flink SQL Gateway"
 readme = "README.md"
