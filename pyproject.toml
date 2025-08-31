@@ -55,7 +55,6 @@ testpaths = ["tests"]
 markers = [
     "integration: tests that hit a live Flink SQL Gateway (set SQL_GATEWAY_API_BASE_URL)",
     "unit: fast, isolated unit tests with pure mocks",
-    "server_mocked: tests that exercise MCP server tools against a mocked SQL Gateway",
 ]
 
 [build-system]

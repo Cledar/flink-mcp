@@ -1,7 +1,7 @@
 import pytest
 
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.server_mocked]
+pytestmark = [pytest.mark.asyncio, pytest.mark.unit]
 
 
 async def test_mcp_server_open_session(client) -> None:
@@ -56,4 +56,3 @@ async def test_mcp_server_fetch_result_page(client, session_handle) -> None:
     p1 = page1.data
     assert p1.get("isEnd") is True
     assert p1.get("nextToken") == 2
-
