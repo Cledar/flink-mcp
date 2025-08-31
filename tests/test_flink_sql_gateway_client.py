@@ -174,19 +174,31 @@ async def test_mcp_server_configure_session(client, session_handle) -> None:
 
 @pytest.mark.asyncio
 async def test_mcp_server_fetch_result_page(client, session_handle) -> None:
-    """Test fetching result page through MCP server"""
-    # Run a simple query
-    query_result = await client.call_tool(
-        "run_query_collect_and_stop",
-        {
-            "session_handle": session_handle,
-            "query": "SELECT 1",
-            "max_rows": 1,
-            "max_seconds": 10.0,
-        },
+    """Test pagination via the fetch_result_page tool."""
+    # Start a streaming query to obtain an operation handle
+    start = await client.call_tool(
+        "run_query_stream_start",
+        {"session_handle": session_handle, "query": "SELECT 1"},
     )
+    start_data = start.data
+    op = start_data.get("operationHandle")
+    assert isinstance(op, str) and op
 
-    query_data = query_result.data
+    # Fetch page 0 and assert it is not EOS
+    page0 = await client.call_tool(
+        "fetch_result_page",
+        {"session_handle": session_handle, "operation_handle": op, "token": 0},
+    )
+    p0 = page0.data
+    assert p0.get("isEnd") is False
+    assert p0.get("nextToken") == 1
+    assert "page" in p0 and isinstance(p0["page"], dict)
 
-    # The collect_and_stop method should return data directly, not require separate page fetching
-    assert "data" in query_data or "errorType" in query_data
+    # Fetch page 1 and assert EOS
+    page1 = await client.call_tool(
+        "fetch_result_page",
+        {"session_handle": session_handle, "operation_handle": op, "token": 1},
+    )
+    p1 = page1.data
+    assert p1.get("isEnd") is True
+    assert p1.get("nextToken") == 2

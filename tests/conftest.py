@@ -98,6 +98,20 @@ def _make_mock_transport() -> httpx.MockTransport:
                     "jobID": "job-1",
                 },
             )
+        if (
+            method == "GET"
+            and path == f"/v3/sessions/{session_handle}/operations/{op_exec}/result/1"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "resultType": "EOS",
+                    "results": {
+                        "columns": [{"name": "col1"}],
+                        "data": [],
+                    },
+                },
+            )
 
         # Close operation
         if (
