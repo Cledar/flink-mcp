@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
       - name: Set up uv (Python 3.12)
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Sync dependencies (dev)
         run: uv sync --all-extras --dev
@@ -28,4 +28,3 @@ jobs:
 
       - name: Run unit tests (skip integration)
         run: uv run pytest -q -m "not integration"
-
