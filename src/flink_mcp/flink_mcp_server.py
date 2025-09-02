@@ -4,7 +4,7 @@ import logging
 import os
 import time
 import asyncio
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -14,8 +14,8 @@ from .flink_sql_gateway_client import FlinkSqlGatewayClient
 
 
 def build_server(
-    base_url: Optional[str] = None,
-    http_client: Optional[httpx.AsyncClient] = None,
+    base_url: str | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> FastMCP:
     load_dotenv()
 
@@ -29,9 +29,9 @@ def build_server(
 
     async def _poll_status(
         session_handle: str, operation_handle: str, timeout: float, interval: float
-    ) -> Tuple[str, Dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any]]:
         end = time.time() + timeout
-        last_payload: Dict[str, Any] = {}
+        last_payload: dict[str, Any] = {}
         while time.time() < end:
             last_payload = await client.get_operation_status(
                 session_handle, operation_handle
@@ -42,11 +42,11 @@ def build_server(
             await asyncio.sleep(interval)
         return "TIMEOUT", last_payload
 
-    def _extract_job_id(page: Dict[str, Any]) -> Optional[str]:
+    def _extract_job_id(page: dict[str, Any]) -> str | None:
         j = page.get("jobID") or page.get("jobId")
         return j if isinstance(j, str) else None
 
-    async def _job_status(session_handle: str, job_id: str) -> Optional[str]:
+    async def _job_status(session_handle: str, job_id: str) -> str | None:
         """Return current cluster job status via DESCRIBE JOB, or None if unavailable.
 
         Extracts the value of the "status" column from the first row of the result.
@@ -90,7 +90,7 @@ def build_server(
 
     async def _submit_stop_job(
         session_handle: str, job_id: str, timeout: float = 30.0, interval: float = 0.5
-    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+    ) -> tuple[str, dict[str, Any]] | None:
         """Submit STOP JOB for a given job and poll the stop operation until terminal status.
 
         Returns a tuple of (status, payload) if an operation handle is available, otherwise None.
@@ -109,14 +109,14 @@ def build_server(
 
     async def _wait_job_stopped(
         session_handle: str, job_id: str, timeout: float = 60.0, interval: float = 1.0
-    ) -> Tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Wait until DESCRIBE JOB reports the job is not RUNNING (or job is gone).
 
         Returns (job_gone, last_status).
         """
         deadline = time.time() + timeout
         job_gone = False
-        last_status: Optional[str] = None
+        last_status: str | None = None
         while time.time() < deadline:
             last_status = await _job_status(session_handle, job_id)
             if last_status is None or str(last_status).strip().upper() != "RUNNING":
@@ -126,24 +126,24 @@ def build_server(
         return job_gone, last_status
 
     @server.resource("https://mcp.local/flink/info")
-    async def flink_info() -> Dict[str, Any]:
+    async def flink_info() -> dict[str, Any]:
         """Return basic cluster information from the SQL Gateway /v1/info endpoint."""
         return await client.get_info()
 
     @server.tool()
     async def open_new_session(
-        properties: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        properties: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Open a new session and return { sessionHandle, ... }."""
         return await client.open_session(properties or {})
 
     @server.tool()
-    async def get_config(session_handle: str) -> Dict[str, Any]:
+    async def get_config(session_handle: str) -> dict[str, Any]:
         """Return current session configuration (properties) for the given session."""
         return await client.get_session(session_handle)
 
     @server.tool()
-    async def configure_session(session_handle: str, statement: str) -> Dict[str, Any]:
+    async def configure_session(session_handle: str, statement: str) -> dict[str, Any]:
         """Apply a single session-scoped DDL/config statement (CREATE/USE/SET/RESET/etc.)."""
         return await client.configure_session(
             session_handle=session_handle, statement=statement
@@ -155,7 +155,7 @@ def build_server(
         query: str,
         max_rows: int = 5,
         max_seconds: float = 15.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run a short-lived query, concatenate results.data until max_rows, then stop the job.
 
         Returns a compact payload: { "columns": [...], "data": [...] }.
@@ -180,7 +180,7 @@ def build_server(
             session_handle, op, max(0.0, deadline - time.time()), 0.5
         )
         if status != "FINISHED":
-            err: Dict[str, Any] = {
+            err: dict[str, Any] = {
                 "errorType": f"OPERATION_{status}",
                 "message": "operation did not finish successfully",
                 "status": status,
@@ -193,10 +193,10 @@ def build_server(
                 pass
             return err
 
-        data_accum: List[Any] = []
-        columns: Optional[List[Any]] = None
+        data_accum: list[Any] = []
+        columns: list[Any] | None = None
         token = 0
-        jid: Optional[str] = None
+        jid: str | None = None
 
         while len(data_accum) < max_rows and time.time() < deadline:
             page = await client.fetch_result(session_handle, op, token=token)
@@ -237,7 +237,7 @@ def build_server(
         return {"columns": (columns or []), "data": data_accum}
 
     @server.tool()
-    async def run_query_stream_start(session_handle: str, query: str) -> Dict[str, Any]:
+    async def run_query_stream_start(session_handle: str, query: str) -> dict[str, Any]:
         """Start a streaming query and return its cluster jobID; leaves the job running."""
 
         try:
@@ -256,7 +256,7 @@ def build_server(
 
         status, status_payload = await _poll_status(session_handle, op, 60.0, 0.5)
         if status != "FINISHED":
-            err: Dict[str, Any] = {
+            err: dict[str, Any] = {
                 "errorType": f"OPERATION_{status}",
                 "message": "operation did not finish successfully",
                 "status": status,
@@ -271,8 +271,8 @@ def build_server(
 
         # Try to read jobID from token 0; if NOT_READY, retry a few times
         retries = 20
-        jid: Optional[str] = None
-        page0: Dict[str, Any] = {}
+        jid: str | None = None
+        page0: dict[str, Any] = {}
         while retries > 0:
             page0 = await client.fetch_result(session_handle, op, token=0)
             jid = _extract_job_id(page0)
@@ -290,7 +290,7 @@ def build_server(
         return {"jobID": jid, "operationHandle": op}
 
     @server.tool()
-    async def cancel_job(session_handle: str, job_id: str) -> Dict[str, Any]:
+    async def cancel_job(session_handle: str, job_id: str) -> dict[str, Any]:
         """Issue STOP JOB <job_id> and remove internal tracking state for that job."""
         logger.debug("cancel_job: submitting STOP JOB %s", job_id)
         stop_status = await _submit_stop_job(session_handle, job_id, 30.0, 0.5)
@@ -317,7 +317,7 @@ def build_server(
     @server.tool()
     async def fetch_result_page(
         session_handle: str, operation_handle: str, token: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch a single page for the given operation handle and token."""
         page = await client.fetch_result(session_handle, operation_handle, token=token)
         rtype = str(page.get("resultType") or "").upper()
