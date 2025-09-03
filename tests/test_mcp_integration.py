@@ -1,8 +1,10 @@
 import pytest
 from fastmcp import Client
 
+from typing import Any
 
-async def _ensure_datagen_table(client: Client, session_handle: str) -> None:
+
+async def _ensure_datagen_table(client: Client[Any], session_handle: str) -> None:
     """Create a temporary unbounded datagen table for streaming"""
     await client.call_tool(
         "configure_session",
@@ -25,7 +27,7 @@ async def _ensure_datagen_table(client: Client, session_handle: str) -> None:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_query_collect_and_stop_success(
-    integration_client, integration_session_handle
+    integration_client: Client[Any], integration_session_handle: str
 ) -> None:
     # Run query
     query_result = await integration_client.call_tool(
@@ -46,7 +48,7 @@ async def test_run_query_collect_and_stop_success(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_query_stream_start_with_datagen_then_cancel(
-    integration_client, integration_session_handle
+    integration_client: Client[Any], integration_session_handle: str
 ) -> None:
     # Setup datagen table
     await _ensure_datagen_table(integration_client, integration_session_handle)
@@ -97,7 +99,7 @@ async def test_run_query_stream_start_with_datagen_then_cancel(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_query_collect_and_stop_error_flow(
-    integration_client, integration_session_handle
+    integration_client: Client[Any], integration_session_handle: str
 ) -> None:
     # Run invalid query
     query_result = await integration_client.call_tool(
@@ -122,7 +124,7 @@ async def test_run_query_collect_and_stop_error_flow(
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_run_query_stream_start_error_flow(
-    integration_client, integration_session_handle
+    integration_client: Client[Any], integration_session_handle: str
 ) -> None:
     # Run invalid streaming query
     stream_result = await integration_client.call_tool(

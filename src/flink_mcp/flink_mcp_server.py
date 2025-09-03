@@ -5,6 +5,7 @@ import os
 import time
 import asyncio
 from typing import Any
+import importlib.metadata
 
 import httpx
 from dotenv import load_dotenv
@@ -19,7 +20,8 @@ def build_server(
 ) -> FastMCP:
     load_dotenv()
 
-    server = FastMCP("Flink SQLGateway MCP Server v0.2.3")
+    version = importlib.metadata.version("flink-mcp")
+    server = FastMCP(f"Flink SQLGateway MCP Server v{version}")
 
     logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ def build_server(
                 return None
             page0 = await client.fetch_result(session_handle, op, token=0)
             results = page0.get("results") or {}
-            columns = results.get("columns") or []
+            columns: list[dict[str, Any]] = results.get("columns") or []
             status_idx = None
             for idx, col in enumerate(columns):
                 try:
@@ -76,7 +78,7 @@ def build_server(
                     continue
             if status_idx is None:
                 return None
-            rows = results.get("data") or []
+            rows: list[dict[str, Any]] = results.get("data") or []
             if not rows:
                 return None
             first = rows[0]
@@ -213,7 +215,7 @@ def build_server(
                 if isinstance(cols, list) and cols:
                     columns = cols
 
-            page_data = res.get("data") or []
+            page_data: list[Any] = res.get("data") or []
             if isinstance(page_data, list) and page_data:
                 need = max_rows - len(data_accum)
                 if need > 0:

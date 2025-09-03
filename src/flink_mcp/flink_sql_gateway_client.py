@@ -25,7 +25,7 @@ class FlinkSqlGatewayClient:
         configured_base_url = base_url or os.getenv(
             "SQL_GATEWAY_API_BASE_URL", "http://localhost:8083"
         )
-        self._base_url = configured_base_url.rstrip("/")
+        self._base_url: str = configured_base_url.rstrip("/")
         self._client: AsyncClient = client or AsyncClient(timeout=timeout_seconds)
 
     def _url(self, path: str) -> str:
