@@ -72,13 +72,7 @@ class FlinkSqlGatewayClient:
             self._url(f"/v3/sessions/{session_handle}/configure-session"), json=payload
         )
         # Some gateways may return empty body on success
-        try:
-            response.raise_for_status()
-            return response.json()
-        except httpx.HTTPStatusError:
-            raise
-        except Exception:
-            return {"status": "OK"}
+        return response.json()
 
     async def execute_statement(
         self,

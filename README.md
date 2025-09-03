@@ -26,7 +26,7 @@ MCP clients should launch the server over stdio with command: `flink-mcp`.
 Ensure `SQL_GATEWAY_API_BASE_URL` is set in your environment or `.env`.
 
 
-### Tools (v0.2.2)
+### Tools (v0.2.5)
 
 - `flink_info` (resource): returns cluster info from `/v3/info`.
 - `open_new_session(properties?: dict)` -> `{ sessionHandle, ... }`.
