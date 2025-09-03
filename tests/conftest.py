@@ -9,6 +9,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastmcp import Client
+from typing import Any
 
 from flink_mcp.flink_mcp_server import build_server
 
@@ -137,7 +138,7 @@ async def client():
 
 
 @pytest_asyncio.fixture
-async def session_handle(client):
+async def session_handle(client: Client[Any]) -> str:
     """Create a session and return the session handle."""
     session_result = await client.call_tool("open_new_session", {})
     return session_result.data["sessionHandle"]
@@ -152,7 +153,7 @@ async def integration_client():
 
 
 @pytest_asyncio.fixture
-async def integration_session_handle(integration_client):
+async def integration_session_handle(integration_client: Client[Any]) -> str:
     """Create a session on the live server and return its handle."""
     session_result = await integration_client.call_tool("open_new_session", {})
     return session_result.data["sessionHandle"]
